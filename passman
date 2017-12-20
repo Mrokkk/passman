@@ -1,22 +1,101 @@
 #!/usr/bin/env python3
 
 import argparse
+import base64
+import getpass
+import json
 import os
 import secrets
 import string
+import sys
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-s', '--size', help='Length', default=16, type=int)
-    return parser.parse_args()
+from Crypto.Cipher import AES
+from Crypto import Random
+from subprocess import Popen, PIPE
 
 DB_FILE = os.path.expanduser('~') + '/.passman'
 
-def main():
-    args = parse_args()
+def round_string(s):
+    extra = len(s) % 16
+    if extra > 0:
+        s = s + (' ' * (16 - extra))
+    return s
+
+
+def read_db(passkey):
+    try:
+        with open(DB_FILE, 'rb') as f:
+            data = f.read()
+        iv = Random.new().read(AES.block_size)
+        cipher = AES.new(round_string(passkey), AES.MODE_ECB, iv)
+        decoded = cipher.decrypt(base64.b64decode(data))
+        return json.loads(decoded.decode('ascii'))
+    except Exception as e:
+        return {}
+
+
+def save_db(j, passkey):
+    json_string = json.dumps(j)
+    iv = Random.new().read(AES.block_size)
+    cipher = AES.new(round_string(passkey), AES.MODE_ECB, iv)
+    encoded = base64.b64encode(cipher.encrypt(round_string(json_string)))
+    with open(DB_FILE, 'wb') as f:
+        f.write(encoded)
+
+
+def dump_pass_to_clipboard(password):
+    p = Popen(['xsel', '-bi'], stdin=PIPE, encoding='ascii')
+    p.communicate(input=password)
+    p.wait()
+    print('Your password has been copied into clipboard')
+
+
+def set_pass(args, passkey):
     char_set = string.ascii_letters + string.digits + string.punctuation
     password = ''.join(secrets.choice(char_set) for i in range(args.size))
-    print(password)
+    j = read_db(passkey)
+    j[args.domain] = password
+    save_db(j, passkey)
+    dump_pass_to_clipboard(password)
+
+
+def get_pass(args, passkey):
+    j = read_db(passkey)
+    try:
+        dump_pass_to_clipboard(j[args.domain])
+    except Exception as e:
+        print('No pass for {}'.format(args.domain))
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    subparsers = parser.add_subparsers(help='sub-command help')
+    set_parser = subparsers.add_parser('set')
+    set_parser.add_argument('domain')
+    set_parser.add_argument('-s', '--size', help='Length', default=16, type=int)
+    set_parser.set_defaults(func=set_pass)
+
+    get_parser = subparsers.add_parser('get')
+    get_parser.add_argument('domain')
+    get_parser.set_defaults(func=get_pass)
+    return parser.parse_args()
+
+
+def read_passkey():
+    password = ''
+    try:
+        password = getpass.getpass(prompt='Type passkey: ')
+        return password
+    except KeyboardInterrupt:
+        sys.exit(1)
+
+
+def main():
+    args = parse_args()
+    passkey = read_passkey()
+    args.func(args, passkey)
+
 
 if __name__ == '__main__':
     main()
