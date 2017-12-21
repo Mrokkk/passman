@@ -82,18 +82,13 @@ def parse_args():
     return parser.parse_args()
 
 
-def read_passkey():
-    password = ''
-    try:
-        password = getpass.getpass(prompt='Type passkey: ')
-        return password
-    except KeyboardInterrupt:
-        sys.exit(1)
-
-
 def main():
     args = parse_args()
-    passkey = read_passkey()
+    try:
+        passkey = getpass.getpass(prompt='Type passkey: ')
+    except KeyboardInterrupt:
+        print('Interrupted')
+        return 1
     args.func(args, passkey)
 
 
